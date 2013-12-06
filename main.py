@@ -15,10 +15,48 @@
 # limitations under the License.
 #
 import webapp2
+from google.appengine.api import memcache
+from google.appengine.api import urlfetch
+from google.appengine.api import taskqueue
+from models import *
+import BeautifulSoup as bs
+
+
+def get_urls(url , domain):
+
+    data = memcache.get(url)
+    #if we haven't seen this url before, add it then go do processing, if we have, exit
+    if data is None:
+        memcache.add(url, url, 3600)
+    else:
+        return
+
+    response = urlfetch.get(url)
+
+    soup = bs.BeautifulSoup(response.content)
+
+    for link in soup.findAll('a'):
+        #check to see if the links are on the domain we started with, if they are not, probably don't need to analyze
+        domain_check = str(link)
+
+        #if data is None and it passes domain check, add it to the task queue
+        if data == None and domain_check.find(domain) != -1:
+            #create api point to make this request again
+            taskqueue.add(url='/api/approval/publish', params={ 'url': link.get('href') , 'domain': domain})
+            #update table
+
+    return crawled
 
 class MainHandler(webapp2.RequestHandler):
     def get(self):
         self.response.write('Hello world!')
+
+    def post(self):
+        url = self.request.get(url)
+        domain = self.request.get(domain)
+        get_urls(url)
+
+
 
 app = webapp2.WSGIApplication([
     ('/', MainHandler)
