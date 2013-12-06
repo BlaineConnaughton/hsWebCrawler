@@ -19,37 +19,39 @@ def main():
 if __name__ == '__main__':
     main()
 
-##def get_urls(url , domain):
+##def get_urls(url2 , domain):
 ##
 ##    to_crawl = []
 ##    crawled = []
 ##
-##    response = urlfetch.get(url)
+##    response = urlfetch.get(url2)
 ##
 ##    soup = bs.BeautifulSoup(response.content)
 ##
 ##    for link in soup.findAll('a'):
-##        to_crawl.append(link)
+##        to_crawl.append((link.get('href')))
 ##
 ##    return to_crawl
 
 
-def get_urls(url2 , domain):
+def get_urls(url , domain):
 
-    to_crawl = []
     crawled = []
+    crawled.append(url)
+    #this needs to be replaced with an update to memcache
 
-    response = urlfetch.get(url2)
+    response = urlfetch.get(url)
 
     soup = bs.BeautifulSoup(response.content)
 
     for link in soup.findAll('a'):
 
-        if link not in crawled and link.find(domain) <> -1:
-            strlink = str(link)
-            to_crawl = to_crawl + get_urls(strlink, domain)
-            crawled.append(link.get('href'))
-        else:
-            to_crawl.append(link)
+        domain_check = str(link)
+        #will need to check memcache
+        if link.get('href') not in crawled and domain_check.find(domain) != -1:
 
-    return to_crawl
+            #create api point to make this request again
+            crawled += get_urls(link.get('href') , domain)
+            #update table
+
+    return crawled
