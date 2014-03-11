@@ -38,9 +38,9 @@ class SessionScraped(db.Model):
 
 class ScrapedUrl(db.Model):
 
-    url = db.StringProperty(required=True)
+    url = db.StringProperty()
     ran_on = db.DateTimeProperty(required=True,auto_now_add=True)
-    domainurl = db.StringProperty(required=True)
+    domainurl = db.StringProperty()
     url_content = db.TextProperty()
     session = db.ReferenceProperty(SessionScraped , collection_name='urls')
 
@@ -57,33 +57,42 @@ def get_urls(url , mysession):
 
     data = memcache.get(url)
     #if we haven't seen this url before, add it then go do processing, if we have, exit
-    if data is None:
-        memcache.add(url, url, 3600)
-        logging.warning("Seen this url before  :  " + url)
+    if data == None:
+        memcache.set(url, 2, 3600)
+    elif data == 1:
+        memcache.set(url, 3, 3600)
     else:
-        return
+        memcache.set(url, 4, 3600)
 
     response = urlfetch.fetch(url)
 
     soup = bs(response.content)
 
+    #Add all the found items to memcache to help with race condition
+    for link in soup.findAll('a'):
+        data = memcache.get(url)
+        if data == None:
+            memcache.set(link.get('href') , 1 , 3600)
+
     for link in soup.findAll('a'):
         #check to see if the links are on the domain we started with, if they are not, probably don't need to analyze
         domain_check = str(link)
+        data = memcache.get(url)
         #if data is None and it passes domain check, add it to the task queue
-        if domain_check.find(str(mysession.domainurl)) != -1:
+        if domain_check.find(str(mysession.domainurl)) != -1 and data != 4:
 
             #double check that we haven't already scraped this from a different queue
-            data = memcache.get(link.get('href'))
-            if data == None:
+            querystring = "SELECT * FROM ScrapedUrl WHERE url = " + "'" + link.get('href') + "'"
+            query = db.GqlQuery(querystring)
+
+            if query.count() == 0:
                 #update table
-                db = ScrapedUrl(domainurl=mysession.domainurl , url=link.get('href'))
-                db.session = mysession
-                db.put()
+                database = ScrapedUrl(domainurl=mysession.domainurl , url=link.get('href'))
+                database.session = mysession
+                database.put()
 
                 #queue api point to make this request again
                 params={ 'url': link.get('href') , 'session': mysession.key().id()}
-                logging.warning("params :  " + str(params))
                 taskqueue.add(url='/api', params=params)
 
     return
@@ -116,6 +125,9 @@ class MainHandler(webapp2.RequestHandler):
         session = SessionScraped()
         session.domainurl = domain
         session.put()
+
+        surl = ScrapedUrl()
+        surl.put()
 
         get_urls(url=url , mysession=session)
 
