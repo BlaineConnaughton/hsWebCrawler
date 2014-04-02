@@ -53,47 +53,57 @@ class ScrapedUrl(db.Model):
         data = q.fetch(count)
         return data
 
+def bump_counter(url):
+    client = memcache.Client()
+
+    while True: # Retry loop
+        counter = client.gets(url)
+        assert counter is not None, 'Uninitialized counter'
+        if client.cas(url, counter+1):
+            break
+
 def get_urls(url , mysession):
 
-    data = memcache.get(url)
+    logging.warning('1')
+    client = memcache.Client()
+
+    data = client.gets(url)
     #if we haven't seen this url before, add it then go do processing, if we have, exit
     if data == None:
-        memcache.set(url, 2, 3600)
-    elif data == 1:
-        memcache.set(url, 3, 3600)
-    else:
-        memcache.set(url, 4, 3600)
+        memcache.set(url , 1)
+    elif data >= 2:
+        return
+
+    bump_counter(url)
 
     response = urlfetch.fetch(url)
 
     soup = bs(response.content)
 
-    #Add all the found items to memcache to help with race condition
     for link in soup.findAll('a'):
-        data = memcache.get(url)
-        if data == None:
-            memcache.set(link.get('href') , 1 , 3600)
+        if link.get('href') <> None:
+            #check to see if the links are on the domain we started with, if they are not, probably don't need to analyze
+            domain_check = str(link)
 
-    for link in soup.findAll('a'):
-        #check to see if the links are on the domain we started with, if they are not, probably don't need to analyze
-        domain_check = str(link)
-        data = memcache.get(url)
-        #if data is None and it passes domain check, add it to the task queue
-        if domain_check.find(str(mysession.domainurl)) != -1 and data != 4:
+            data = client.gets(link.get('href'))
 
-            #double check that we haven't already scraped this from a different queue
-            querystring = "SELECT * FROM ScrapedUrl WHERE url = " + "'" + link.get('href') + "'"
-            query = db.GqlQuery(querystring)
+            #if data is None and it passes domain check, add it to the task queue
+            if domain_check.find(str(mysession.domainurl)) != -1 and data == None:
+                memcache.set(link.get('href') , 1)
 
-            if query.count() == 0:
-                #update table
-                database = ScrapedUrl(domainurl=mysession.domainurl , url=link.get('href'))
-                database.session = mysession
-                database.put()
+                #double check that we haven't already scraped this from a different queue
+                querystring = "SELECT * FROM ScrapedUrl WHERE url = " + "'" + link.get('href') + "'"
+                query = db.GqlQuery(querystring)
 
-                #queue api point to make this request again
-                params={ 'url': link.get('href') , 'session': mysession.key().id()}
-                taskqueue.add(url='/api', params=params)
+                if query.count() == 0:
+                    #update table
+                    database = ScrapedUrl(domainurl=mysession.domainurl , url=link.get('href'))
+                    database.session = mysession
+                    database.put()
+
+                    #queue api point to make this request again
+                    params={ 'url': link.get('href') , 'session': mysession.key().id()}
+                    taskqueue.add(url='/api', params=params)
 
     return
 
