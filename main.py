@@ -64,7 +64,6 @@ def bump_counter(url):
 
 def get_urls(url , mysession):
 
-    logging.warning('1')
     client = memcache.Client()
 
     data = client.gets(url)
@@ -139,6 +138,10 @@ class MainHandler(webapp2.RequestHandler):
         surl = ScrapedUrl()
         surl.put()
 
+        #r = requests.get(url + '/sitemap.xml')
+        #if r.status_code == '200':
+        #    scrape_sitemap(xrangeml = r.content , mysession=session)
+        #else:
         get_urls(url=url , mysession=session)
 
 
